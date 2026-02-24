@@ -1,0 +1,43 @@
+# =============================================================================
+# Sofia Belmont LoRA — .gitignore
+# =============================================================================
+
+# ── Dataset (photos personnelles — NE PAS versionner) ──
+dataset/sofia/raw/
+dataset/sofia/processed/
+dataset/sofia/captions/
+
+# ── Modèles (trop volumineux pour git) ──
+*.safetensors
+*.ckpt
+*.pt
+*.bin
+*.onnx
+
+# ── Outputs et logs ──
+outputs/
+logs/
+__pycache__/
+*.pyc
+*.pyo
+.cache/
+
+# ── Environnement ──
+.env
+.env.*
+*.log
+
+# ── Kohya SS / ComfyUI (installés sur RunPod, pas versionnés) ──
+kohya_ss/
+ComfyUI/
+models/
+
+# ── Latents cachés ──
+cache/
+latents/
+*.latents
+
+# ── OS ──
+.DS_Store
+Thumbs.db
+desktop.ini

@@ -1,0 +1,24 @@
+# =============================================================================
+# Sofia Belmont — Dataset Config pour Kohya SS Flux LoRA
+# Optimisé pour NVIDIA A40 (48GB VRAM)
+# =============================================================================
+# Fichier : /workspace/sofia_lora_config.toml
+# =============================================================================
+
+[general]
+enable_bucket         = true
+min_bucket_resolution = 512
+max_bucket_resolution = 2048
+bucket_reso_steps     = 64
+caption_extension     = ".txt"
+shuffle_caption       = false   # Ne pas mélanger — trigger word doit rester en 1er
+
+[[datasets]]
+resolution  = 1024       # Résolution d'entraînement Flux (1024x1024)
+batch_size  = 1          # 1 sur A100 40GB avec gradient checkpointing
+
+  [[datasets.subsets]]
+  image_dir         = "/workspace/dataset/sofia/processed"
+  caption_extension = ".txt"
+  num_repeats       = 10   # Répétitions par epoch — augmenter si < 20 images
+  # caption_dropout_rate = 0.05  # Décommenter pour plus de généralisation
