@@ -16,8 +16,8 @@ set -e
 # VARIABLES
 # ─────────────────────────────────────────────
 WORKSPACE=/workspace
-REPO_URL="https://github.com/TON_USERNAME/Lora_Sofia.git"   # ← À remplacer
-REPO_DIR=$WORKSPACE/Lora_Sofia
+REPO_URL="https://github.com/KingOsX/Sofia_FLux_Lora.git"
+REPO_DIR=$WORKSPACE/Sofia_FLux_Lora
 MODELS_DIR=$WORKSPACE/models
 KOHYA_DIR=$WORKSPACE/kohya_ss
 COMFYUI_DIR=$WORKSPACE/ComfyUI
