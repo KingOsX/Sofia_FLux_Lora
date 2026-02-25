@@ -36,6 +36,32 @@ COMFYUI_DIR=$WORKSPACE/ComfyUI
 ENV_FILE=$WORKSPACE/.env
 
 # ─────────────────────────────────────────────
+# HELPERS HUGGINGFACE (via Python API)
+# ─────────────────────────────────────────────
+hf_snapshot() {
+    # Usage: hf_snapshot <repo_id> <local_dir> [pattern1 pattern2 ...]
+    python3 -c "
+from huggingface_hub import snapshot_download
+import os, sys
+repo, local_dir = sys.argv[1], sys.argv[2]
+patterns = sys.argv[3:] if len(sys.argv) > 3 else None
+snapshot_download(repo, local_dir=local_dir, allow_patterns=patterns,
+    token=os.environ.get('HF_TOKEN'),
+    ignore_patterns=['*.msgpack','*.h5','flax_model*','tf_model*','rust_model*'])
+" "$@"
+}
+
+hf_file() {
+    # Usage: hf_file <repo_id> <filename> <local_dir>
+    python3 -c "
+from huggingface_hub import hf_hub_download
+import os, sys
+hf_hub_download(sys.argv[1], sys.argv[2], local_dir=sys.argv[3],
+    token=os.environ.get('HF_TOKEN'))
+" "$@"
+}
+
+# ─────────────────────────────────────────────
 # CATALOGUE DES MODÈLES FLUX
 # Format : "NOM|SOURCE|ID_OU_URL|DESCRIPTION"
 # Sources : HF (HuggingFace) | CIVITAI
@@ -162,11 +188,7 @@ download_flux_model() {
             warn "Download ~23-28GB — prendre un café ☕"
 
             # Chercher le fichier .safetensors principal dans le repo HF
-            python3 -m huggingface_hub download \
-                "$FLUX_ID" \
-                --local-dir "$out_dir/tmp_$FLUX_NAME" \
-                --include "*.safetensors" \
-                --token "$HF_TOKEN"
+            hf_snapshot "$FLUX_ID" "$out_dir/tmp_$FLUX_NAME" "*.safetensors"
 
             # Trouver le fichier principal (le plus gros)
             MAIN_FILE=$(find "$out_dir/tmp_$FLUX_NAME" -name "*.safetensors" -not -name "ae.safetensors" | sort -S | tail -1)
@@ -233,11 +255,7 @@ download_vae() {
     mkdir -p "$MODELS_DIR/vae"
     [ -z "$HF_TOKEN" ] && error "HF_TOKEN requis pour le VAE"
 
-    python3 -m huggingface_hub download \
-        black-forest-labs/FLUX.1-dev \
-        ae.safetensors \
-        --local-dir "$MODELS_DIR/vae" \
-        --token "$HF_TOKEN"
+    hf_file "black-forest-labs/FLUX.1-dev" "ae.safetensors" "$MODELS_DIR/vae"
 
     log "VAE → $VAE_FILE"
 }
@@ -251,10 +269,7 @@ download_clip() {
     fi
 
     mkdir -p "$CLIP_DIR"
-    python3 -m huggingface_hub download \
-        openai/clip-vit-large-patch14 \
-        --local-dir "$CLIP_DIR" \
-        --token "$HF_TOKEN"
+    hf_snapshot "openai/clip-vit-large-patch14" "$CLIP_DIR"
 
     log "CLIP → $CLIP_DIR"
 }
@@ -268,11 +283,7 @@ download_t5() {
     fi
 
     mkdir -p "$T5_DIR"
-    python3 -m huggingface_hub download \
-        google/t5-v1_1-xxl \
-        --local-dir "$T5_DIR" \
-        --include "*.safetensors" "*.json" "*.txt" \
-        --token "$HF_TOKEN"
+    hf_snapshot "google/t5-v1_1-xxl" "$T5_DIR" "*.safetensors" "*.json" "*.txt"
 
     log "T5-XXL → $T5_DIR"
 }
@@ -297,11 +308,7 @@ download_controlnet_flux() {
 
         info "Téléchargement : $repo"
         local tmp="$MODELS_DIR/controlnet/tmp_$(basename $repo)"
-        python3 -m huggingface_hub download \
-            "$repo" \
-            --include "*.safetensors" \
-            --local-dir "$tmp" \
-            --token "$HF_TOKEN"
+        hf_snapshot "$repo" "$tmp" "*.safetensors"
 
         local found
         found=$(find "$tmp" -name "*.safetensors" | head -1)
