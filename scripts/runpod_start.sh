@@ -200,9 +200,21 @@ echo "  📸 Images traitées : $IMAGE_COUNT" | tee -a $LOG_FILE
 echo "  📝 Captions        : $CAPTION_COUNT" | tee -a $LOG_FILE
 
 # ─────────────────────────────────────────────
-# 8. DÉMARRAGE AUTOMATIQUE SERVICES (optionnel)
+# 8. DÉMARRAGE AUTOMATIQUE SERVICES
 # ─────────────────────────────────────────────
-# Décommenter ce que vous voulez lancer automatiquement :
+
+# --- Jupyter Lab (port 8888) ---
+pip install -q --root-user-action=ignore jupyterlab 2>/dev/null || true
+nohup jupyter lab \
+    --ip=0.0.0.0 \
+    --port=8888 \
+    --no-browser \
+    --allow-root \
+    --NotebookApp.token='' \
+    --NotebookApp.password='' \
+    --notebook-dir=$WORKSPACE \
+    > $WORKSPACE/jupyter.log 2>&1 &
+log "Jupyter Lab démarré → port 8888 (sans mot de passe)"
 
 # --- TensorBoard (port 6006) ---
 # if [ -d "$WORKSPACE/logs" ]; then
