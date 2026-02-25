@@ -430,9 +430,11 @@ install_comfyui() {
     else
         cd $WORKSPACE
         git clone https://github.com/comfyanonymous/ComfyUI.git
-        cd $COMFYUI_DIR
-        pip install -q -r requirements.txt
     fi
+
+    # Toujours installer/mettre à jour les dépendances (y compris alembic, sqlalchemy, comfy_aimdo)
+    cd $COMFYUI_DIR
+    pip install -q --root-user-action=ignore -r requirements.txt
 
     # Liens symboliques
     mkdir -p $COMFYUI_DIR/models/{unet,vae,clip,loras,controlnet}
