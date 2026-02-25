@@ -292,7 +292,7 @@ download_t5() {
 # TÉLÉCHARGER LES MODÈLES CONTROLNET FLUX
 # ─────────────────────────────────────────────
 download_controlnet_flux() {
-    header "ControlNet Flux — InstantX (~3.3GB × 3)"
+    header "ControlNet Flux — InstantX (~3.3GB × 2)"
 
     mkdir -p "$MODELS_DIR/controlnet"
 
@@ -308,7 +308,13 @@ download_controlnet_flux() {
 
         info "Téléchargement : $repo"
         local tmp="$MODELS_DIR/controlnet/tmp_$(basename $repo)"
-        hf_snapshot "$repo" "$tmp" "*.safetensors"
+
+        # Continuer même si un modèle est indisponible
+        if ! hf_snapshot "$repo" "$tmp" "*.safetensors"; then
+            warn "$repo indisponible → skip"
+            rm -rf "$tmp"
+            return
+        fi
 
         local found
         found=$(find "$tmp" -name "*.safetensors" | head -1)
@@ -325,7 +331,6 @@ download_controlnet_flux() {
     }
 
     _dl_cn "InstantX/FLUX.1-dev-Controlnet-Canny" "flux-controlnet-canny.safetensors"
-    _dl_cn "InstantX/FLUX.1-dev-Controlnet-Depth" "flux-controlnet-depth.safetensors"
     _dl_cn "InstantX/FLUX.1-dev-Controlnet-Union" "flux-controlnet-union.safetensors"
 
     log "ControlNet Flux prêt → $MODELS_DIR/controlnet/"
