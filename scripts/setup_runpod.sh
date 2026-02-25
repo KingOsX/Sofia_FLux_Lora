@@ -391,14 +391,15 @@ install_kohya() {
     if [ -d "$KOHYA_DIR" ]; then
         info "Kohya SS déjà présent → mise à jour..."
         cd $KOHYA_DIR && git pull -q
+        git submodule update --init --recursive -q
     else
         cd $WORKSPACE
-        git clone https://github.com/bmaltais/kohya_ss.git
+        git clone --recurse-submodules https://github.com/bmaltais/kohya_ss.git
     fi
 
     cd $KOHYA_DIR
     pip install -q torch torchvision --index-url https://download.pytorch.org/whl/cu124
-    pip install -q -r requirements.txt
+    pip install -q --root-user-action=ignore -r requirements.txt
     [ -f requirements_flux.txt ] && pip install -q -r requirements_flux.txt || true
 
     python -c "import torch; assert torch.cuda.is_available(); print(f'CUDA ✓ — {torch.cuda.get_device_name(0)}')"
