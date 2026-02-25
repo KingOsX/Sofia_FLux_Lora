@@ -161,10 +161,8 @@ download_flux_model() {
             info "Source : HuggingFace → $FLUX_ID"
             warn "Download ~23-28GB — prendre un café ☕"
 
-            pip install -q huggingface_hub
-
             # Chercher le fichier .safetensors principal dans le repo HF
-            huggingface-cli download \
+            python3 -m huggingface_hub download \
                 "$FLUX_ID" \
                 --local-dir "$out_dir/tmp_$FLUX_NAME" \
                 --include "*.safetensors" \
@@ -235,7 +233,7 @@ download_vae() {
     mkdir -p "$MODELS_DIR/vae"
     [ -z "$HF_TOKEN" ] && error "HF_TOKEN requis pour le VAE"
 
-    huggingface-cli download \
+    python3 -m huggingface_hub download \
         black-forest-labs/FLUX.1-dev \
         ae.safetensors \
         --local-dir "$MODELS_DIR/vae" \
@@ -253,7 +251,7 @@ download_clip() {
     fi
 
     mkdir -p "$CLIP_DIR"
-    huggingface-cli download \
+    python3 -m huggingface_hub download \
         openai/clip-vit-large-patch14 \
         --local-dir "$CLIP_DIR" \
         --token "$HF_TOKEN"
@@ -270,7 +268,7 @@ download_t5() {
     fi
 
     mkdir -p "$T5_DIR"
-    huggingface-cli download \
+    python3 -m huggingface_hub download \
         google/t5-v1_1-xxl \
         --local-dir "$T5_DIR" \
         --include "*.safetensors" "*.json" "*.txt" \
@@ -299,7 +297,7 @@ download_controlnet_flux() {
 
         info "Téléchargement : $repo"
         local tmp="$MODELS_DIR/controlnet/tmp_$(basename $repo)"
-        huggingface-cli download \
+        python3 -m huggingface_hub download \
             "$repo" \
             --include "*.safetensors" \
             --local-dir "$tmp" \
