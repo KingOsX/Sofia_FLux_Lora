@@ -124,29 +124,69 @@ check_model() {
     fi
 }
 
-check_model "$MODELS_DIR/flux/flux1-dev.safetensors"           "Flux.1-dev"
 check_model "$MODELS_DIR/vae/ae.safetensors"                   "VAE"
-check_model "$MODELS_DIR/clip/clip-vit-large-patch14"          "CLIP"
-check_model "$MODELS_DIR/clip/t5-v1_1-xxl"                    "T5-XXL"
+check_model "$COMFYUI_DIR/models/clip/clip_l.safetensors"      "CLIP-L (ComfyUI)"
+check_model "$COMFYUI_DIR/models/clip/t5xxl_fp8_e4m3fn.safetensors" "T5-XXL fp8 (ComfyUI)"
+
+# Vérifier qu'au moins un modèle Flux est présent
+FLUX_COUNT=$(find $MODELS_DIR/flux -name "*.safetensors" -size +1M 2>/dev/null | wc -l)
+if [ "$FLUX_COUNT" -gt 0 ]; then
+    log "Modèles Flux : $FLUX_COUNT trouvé(s)"
+    find $MODELS_DIR/flux -name "*.safetensors" -size +1M 2>/dev/null | while read f; do
+        SIZE=$(du -sh "$f" | cut -f1)
+        log "  ✓ $(basename $f) ($SIZE)"
+    done
+else
+    warn "Aucun modèle Flux valide → lancer setup_runpod.sh"
+fi
 
 # ─────────────────────────────────────────────
 # 5. VÉRIFICATION KOHYA SS
 # ─────────────────────────────────────────────
 if [ -d "$KOHYA_DIR" ]; then
     log "Kohya SS présent"
-    # Mise à jour légère si nécessaire
-    # cd $KOHYA_DIR && git pull -q 2>/dev/null || true
 else
     warn "Kohya SS non installé → lancer setup_runpod.sh"
 fi
 
 # ─────────────────────────────────────────────
-# 6. VÉRIFICATION COMFYUI
+# 6. COMFYUI — DÉPENDANCES + SYMLINKS
+# (pip packages perdus à chaque restart container)
 # ─────────────────────────────────────────────
 if [ -d "$COMFYUI_DIR" ]; then
-    log "ComfyUI présent"
+    log "ComfyUI présent → réinstallation des dépendances..."
+    pip install -q --root-user-action=ignore -r $COMFYUI_DIR/requirements.txt 2>&1 | tail -1 | tee -a $LOG_FILE
+    log "ComfyUI dépendances OK"
+
+    # Symlinks modèles → ComfyUI
+    mkdir -p $COMFYUI_DIR/models/{checkpoints,unet,vae,clip,loras,controlnet}
+
+    # Tous les modèles Flux → checkpoints ET unet
+    for f in $MODELS_DIR/flux/*.safetensors; do
+        [ -f "$f" ] || continue
+        bn=$(basename "$f")
+        [ ! -e "$COMFYUI_DIR/models/checkpoints/$bn" ] && \
+            ln -sf "$f" "$COMFYUI_DIR/models/checkpoints/$bn"
+        [ ! -e "$COMFYUI_DIR/models/unet/$bn" ] && \
+            ln -sf "$f" "$COMFYUI_DIR/models/unet/$bn"
+    done
+
+    # VAE
+    [ -f "$MODELS_DIR/vae/ae.safetensors" ] && \
+        ln -sf "$MODELS_DIR/vae/ae.safetensors" \
+               "$COMFYUI_DIR/models/vae/ae.safetensors" 2>/dev/null || true
+
+    # LoRAs
+    [ -d "$WORKSPACE/loras" ] && \
+        ln -sf "$WORKSPACE/loras" "$COMFYUI_DIR/models/loras" 2>/dev/null || true
+
+    # ControlNet
+    [ -d "$MODELS_DIR/controlnet" ] && \
+        ln -sf "$MODELS_DIR/controlnet" "$COMFYUI_DIR/models/controlnet" 2>/dev/null || true
+
+    log "Symlinks ComfyUI recréés"
 else
-    warn "ComfyUI non installé (optionnel)"
+    warn "ComfyUI non installé → lancer setup_runpod.sh option [1]"
 fi
 
 # ─────────────────────────────────────────────
