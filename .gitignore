@@ -32,6 +32,9 @@ kohya_ss/
 ComfyUI/
 models/
 
+# ── Garder les workflows ComfyUI ──
+!comfyui/
+
 # ── Latents cachés ──
 cache/
 latents/
