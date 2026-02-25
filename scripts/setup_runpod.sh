@@ -1,260 +1,421 @@
 #!/bin/bash
 # =============================================================================
-# SOFIA BELMONT — Setup RunPod complet
-# Flux.1-dev + Kohya SS + ComfyUI
+# SOFIA BELMONT — Setup RunPod
+# Flux.1-dev + Kohya SS + ComfyUI — NVIDIA A40 48GB
 # =============================================================================
-# Usage : bash /workspace/scripts/setup_runpod.sh
+# Usage :
+#   bash setup_runpod.sh              # interactif
+#   bash setup_runpod.sh --auto       # non-interactif (tokens via env vars)
 # =============================================================================
 
-set -e  # Stop on error
+set -e
 
 # ─────────────────────────────────────────────
 # COULEURS
 # ─────────────────────────────────────────────
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-CYAN='\033[0;36m'
-NC='\033[0m' # No Color
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
+BLUE='\033[0;34m'; CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
 
 log()    { echo -e "${GREEN}[✅]${NC} $1"; }
 info()   { echo -e "${BLUE}[ℹ️ ]${NC} $1"; }
 warn()   { echo -e "${YELLOW}[⚠️ ]${NC} $1"; }
 error()  { echo -e "${RED}[❌]${NC} $1"; exit 1; }
-header() { echo -e "\n${CYAN}═══════════════════════════════════════${NC}"; echo -e "${CYAN}  $1${NC}"; echo -e "${CYAN}═══════════════════════════════════════${NC}\n"; }
+header() { echo -e "\n${CYAN}${BOLD}═══ $1 ═══${NC}\n"; }
 
 # ─────────────────────────────────────────────
-# CONFIG
+# PATHS
 # ─────────────────────────────────────────────
 WORKSPACE=/workspace
 MODELS_DIR=$WORKSPACE/models
-DATASET_DIR=$WORKSPACE/dataset/sofia
 LORAS_DIR=$WORKSPACE/loras
-SCRIPTS_DIR=$WORKSPACE/scripts
 LOGS_DIR=$WORKSPACE/logs
 OUTPUTS_DIR=$WORKSPACE/outputs
-
+SCRIPTS_DIR=$WORKSPACE/Sofia_FLux_Lora/scripts
 KOHYA_DIR=$WORKSPACE/kohya_ss
 COMFYUI_DIR=$WORKSPACE/ComfyUI
-
-HF_TOKEN=""   # ← Rempli par la fonction ask_hf_token
+ENV_FILE=$WORKSPACE/.env
 
 # ─────────────────────────────────────────────
-# VÉRIFICATIONS INITIALES
+# CATALOGUE DES MODÈLES FLUX
+# Format : "NOM|SOURCE|ID_OU_URL|DESCRIPTION"
+# Sources : HF (HuggingFace) | CIVITAI
 # ─────────────────────────────────────────────
-check_gpu() {
-    header "Vérification GPU"
-    if ! command -v nvidia-smi &> /dev/null; then
-        error "nvidia-smi non trouvé. Assurez-vous d'être sur un pod avec GPU."
-    fi
-    nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader
-    log "GPU détecté"
-}
+declare -A MODELS
+MODELS=(
+    [1]="flux1-dev|HF|black-forest-labs/FLUX.1-dev|Official Flux.1-dev (28GB) — meilleur pour LoRA"
+    [2]="flux1-schnell|HF|black-forest-labs/FLUX.1-schnell|Official Flux.1-schnell (28GB) — plus rapide, 4 steps"
+    [3]="flux1-dev-fp8|CIVITAI|361593|Flux.1-dev FP8 optimisé (~16GB) — économise VRAM"
+    [4]="flux1-dev-nf4|CIVITAI|363989|Flux.1-dev NF4 quantized (~8GB) — plus léger"
+    [5]="fluxed-up-nsfw|CIVITAI_URL|https://civitai.com/api/download/models/2577735?type=Model&format=SafeTensor&size=pruned&fp=fp16|Fluxed Up NSFW — Flux.1-D fp16 pruned — CivitAI 2577735"
+    [6]="custom|CUSTOM||Entrer une URL CivitAI ou HF personnalisée"
+)
 
-check_disk() {
-    header "Espace disque"
-    df -h $WORKSPACE | tail -1
-    AVAIL=$(df $WORKSPACE | tail -1 | awk '{print $4}')
-    # Minimum 80GB recommandé (en KB)
-    if [ "$AVAIL" -lt 83886080 ]; then
-        warn "Moins de 80GB disponibles. Recommandé : 150GB+"
-    else
-        log "Espace disque suffisant"
+# ─────────────────────────────────────────────
+# CHARGER LES TOKENS
+# ─────────────────────────────────────────────
+load_tokens() {
+    # Priorité : env vars existantes > fichier .env
+    if [ -f "$ENV_FILE" ]; then
+        source "$ENV_FILE"
+        log ".env chargé depuis $ENV_FILE"
     fi
-}
 
-ask_hf_token() {
-    header "HuggingFace Token"
-    echo -e "${YELLOW}Flux.1-dev est un modèle à accès restreint.${NC}"
-    echo -e "→ Obtenez votre token sur : ${CYAN}https://huggingface.co/settings/tokens${NC}"
-    echo -e "→ Et acceptez les conditions : ${CYAN}https://huggingface.co/black-forest-labs/FLUX.1-dev${NC}"
-    echo ""
-    read -p "Entrez votre HuggingFace token (hf_xxx...) : " HF_TOKEN
+    # Vérifier HF_TOKEN
     if [ -z "$HF_TOKEN" ]; then
-        error "Token HuggingFace requis pour télécharger Flux.1-dev"
+        if [ "$1" == "--auto" ]; then
+            error "HF_TOKEN manquant. Définir dans $ENV_FILE ou en variable d'environnement."
+        fi
+        echo -e "${YELLOW}HuggingFace Token requis pour certains modèles.${NC}"
+        echo -e "→ Obtenir sur : ${CYAN}https://huggingface.co/settings/tokens${NC}"
+        read -p "HF Token (hf_xxx...) ou Entrée pour passer : " HF_TOKEN
+        [ -n "$HF_TOKEN" ] && echo "HF_TOKEN=$HF_TOKEN" >> $ENV_FILE
+    else
+        log "HF_TOKEN configuré ✓"
     fi
-    export HF_TOKEN=$HF_TOKEN
-    log "Token HuggingFace configuré"
+
+    # Vérifier CIVITAI_TOKEN
+    if [ -z "$CIVITAI_TOKEN" ]; then
+        if [ "$1" != "--auto" ]; then
+            echo -e "${YELLOW}CivitAI Token requis pour les modèles CivitAI.${NC}"
+            echo -e "→ Obtenir sur : ${CYAN}https://civitai.com/user/account${NC}"
+            read -p "CivitAI Token ou Entrée pour passer : " CIVITAI_TOKEN
+            [ -n "$CIVITAI_TOKEN" ] && echo "CIVITAI_TOKEN=$CIVITAI_TOKEN" >> $ENV_FILE
+        fi
+    else
+        log "CIVITAI_TOKEN configuré ✓"
+    fi
+
+    export HF_TOKEN CIVITAI_TOKEN
 }
 
 # ─────────────────────────────────────────────
-# STEP 1 : STRUCTURE DE DOSSIERS
+# MENU SÉLECTION DU MODÈLE FLUX
 # ─────────────────────────────────────────────
-create_structure() {
-    header "Création de la structure de dossiers"
+select_flux_model() {
+    header "Sélection du modèle Flux de base"
 
-    mkdir -p $MODELS_DIR/{flux,clip,vae,controlnet}
-    mkdir -p $DATASET_DIR/{raw,processed,captions}
-    mkdir -p $LORAS_DIR
-    mkdir -p $SCRIPTS_DIR
-    mkdir -p $LOGS_DIR
-    mkdir -p $OUTPUTS_DIR
+    echo -e "  ${BOLD}Modèles disponibles :${NC}\n"
+    for key in $(echo "${!MODELS[@]}" | tr ' ' '\n' | sort -n); do
+        IFS='|' read -r name source model_id desc <<< "${MODELS[$key]}"
+        echo -e "  ${CYAN}[$key]${NC} ${BOLD}$name${NC}  (${YELLOW}$source${NC})"
+        echo -e "      $desc"
+        echo ""
+    done
 
-    log "Structure créée dans $WORKSPACE"
-    tree $WORKSPACE -L 2 2>/dev/null || ls -la $WORKSPACE
+    read -p "Votre choix [1-6] : " MODEL_CHOICE
+
+    IFS='|' read -r FLUX_NAME FLUX_SOURCE FLUX_ID FLUX_DESC <<< "${MODELS[$MODEL_CHOICE]}"
+
+    if [ -z "$FLUX_NAME" ]; then
+        error "Choix invalide"
+    fi
+
+    # Si custom → demander l'URL
+    if [ "$FLUX_SOURCE" == "CUSTOM" ]; then
+        echo ""
+        echo -e "${YELLOW}Entrez l'URL ou l'ID du modèle :${NC}"
+        echo -e "  • HuggingFace : ${CYAN}author/model-name${NC}"
+        echo -e "  • CivitAI URL : ${CYAN}https://civitai.com/api/download/models/XXXXXX${NC}"
+        echo -e "  • CivitAI ID  : ${CYAN}123456${NC}"
+        echo ""
+        read -p "URL / ID : " CUSTOM_INPUT
+
+        if [[ "$CUSTOM_INPUT" == https://civitai.com* ]]; then
+            FLUX_SOURCE="CIVITAI_URL"
+            FLUX_ID="$CUSTOM_INPUT"
+            FLUX_NAME="flux-custom"
+        elif [[ "$CUSTOM_INPUT" =~ ^[0-9]+$ ]]; then
+            FLUX_SOURCE="CIVITAI"
+            FLUX_ID="$CUSTOM_INPUT"
+            FLUX_NAME="flux-custom-${CUSTOM_INPUT}"
+        else
+            FLUX_SOURCE="HF"
+            FLUX_ID="$CUSTOM_INPUT"
+            FLUX_NAME=$(echo $CUSTOM_INPUT | tr '/' '-')
+        fi
+    fi
+
+    log "Modèle sélectionné : $FLUX_NAME ($FLUX_SOURCE)"
 }
 
 # ─────────────────────────────────────────────
-# STEP 2 : DÉPENDANCES SYSTÈME
+# TÉLÉCHARGER MODÈLE FLUX (selon source)
 # ─────────────────────────────────────────────
-install_system_deps() {
-    header "Installation des dépendances système"
+download_flux_model() {
+    local out_dir="$MODELS_DIR/flux"
+    local out_file="$out_dir/${FLUX_NAME}.safetensors"
 
-    apt-get update -qq
-    apt-get install -y -qq \
-        git \
-        curl \
-        wget \
-        aria2 \
-        tree \
-        htop \
-        tmux \
-        unzip \
-        libgl1-mesa-glx \
-        libglib2.0-0 \
-        2>/dev/null
+    mkdir -p "$out_dir"
 
-    log "Dépendances système installées"
-}
-
-# ─────────────────────────────────────────────
-# STEP 3 : PYTHON & PIP
-# ─────────────────────────────────────────────
-install_python_deps() {
-    header "Installation des dépendances Python"
-
-    pip install -q --upgrade pip
-    pip install -q \
-        huggingface_hub \
-        Pillow \
-        tqdm \
-        tensorboard \
-        accelerate \
-        diffusers \
-        transformers \
-        safetensors
-
-    log "Dépendances Python installées"
-}
-
-# ─────────────────────────────────────────────
-# STEP 4 : TÉLÉCHARGEMENT FLUX.1-DEV
-# ─────────────────────────────────────────────
-download_flux() {
-    header "Téléchargement Flux.1-dev (~23GB)"
-    warn "Cela peut prendre 20-40 minutes selon la connexion..."
-
-    if [ -f "$MODELS_DIR/flux/flux1-dev.safetensors" ]; then
-        log "flux1-dev.safetensors déjà présent, skip."
+    if [ -f "$out_file" ]; then
+        log "$FLUX_NAME déjà présent → skip"
         return
     fi
 
-    huggingface-cli download \
-        black-forest-labs/FLUX.1-dev \
-        --local-dir $MODELS_DIR/flux \
-        --include "flux1-dev.safetensors" \
-        --token $HF_TOKEN
+    header "Téléchargement $FLUX_NAME"
 
-    log "Flux.1-dev téléchargé → $MODELS_DIR/flux/"
-}
+    case "$FLUX_SOURCE" in
 
-# ─────────────────────────────────────────────
-# STEP 5 : TÉLÉCHARGEMENT CLIP ENCODERS
-# ─────────────────────────────────────────────
-download_clip() {
-    header "Téléchargement CLIP Text Encoder (~1.7GB)"
+        HF)
+            [ -z "$HF_TOKEN" ] && error "HF_TOKEN requis pour télécharger depuis HuggingFace"
+            info "Source : HuggingFace → $FLUX_ID"
+            warn "Download ~23-28GB — prendre un café ☕"
 
-    CLIP_DIR=$MODELS_DIR/clip/clip-vit-large-patch14
+            pip install -q huggingface_hub
 
-    if [ -d "$CLIP_DIR" ] && [ "$(ls -A $CLIP_DIR)" ]; then
-        log "CLIP déjà présent, skip."
-    else
-        huggingface-cli download \
-            openai/clip-vit-large-patch14 \
-            --local-dir $CLIP_DIR \
-            --token $HF_TOKEN
-        log "CLIP téléchargé"
+            # Chercher le fichier .safetensors principal dans le repo HF
+            huggingface-cli download \
+                "$FLUX_ID" \
+                --local-dir "$out_dir/tmp_$FLUX_NAME" \
+                --include "*.safetensors" \
+                --token "$HF_TOKEN"
+
+            # Trouver le fichier principal (le plus gros)
+            MAIN_FILE=$(find "$out_dir/tmp_$FLUX_NAME" -name "*.safetensors" -not -name "ae.safetensors" | sort -S | tail -1)
+            mv "$MAIN_FILE" "$out_file"
+            rm -rf "$out_dir/tmp_$FLUX_NAME"
+            ;;
+
+        CIVITAI)
+            [ -z "$CIVITAI_TOKEN" ] && error "CIVITAI_TOKEN requis pour télécharger depuis CivitAI"
+            info "Source : CivitAI model ID → $FLUX_ID"
+
+            CIVITAI_URL="https://civitai.com/api/download/models/${FLUX_ID}?token=${CIVITAI_TOKEN}"
+
+            info "Téléchargement en cours..."
+            curl -L \
+                --progress-bar \
+                -H "Authorization: Bearer $CIVITAI_TOKEN" \
+                -o "$out_file" \
+                "$CIVITAI_URL"
+            ;;
+
+        CIVITAI_URL)
+            [ -z "$CIVITAI_TOKEN" ] && error "CIVITAI_TOKEN requis"
+            info "Source : CivitAI URL directe"
+
+            # Ajouter le token si pas déjà dans l'URL
+            if [[ "$FLUX_ID" != *"token="* ]]; then
+                CIVITAI_URL="${FLUX_ID}?token=${CIVITAI_TOKEN}"
+            else
+                CIVITAI_URL="$FLUX_ID"
+            fi
+
+            curl -L \
+                --progress-bar \
+                -H "Authorization: Bearer $CIVITAI_TOKEN" \
+                -o "$out_file" \
+                "$CIVITAI_URL"
+            ;;
+    esac
+
+    # Vérifier le download
+    if [ ! -f "$out_file" ] || [ ! -s "$out_file" ]; then
+        error "Téléchargement échoué ou fichier vide : $out_file"
     fi
-}
 
-download_t5() {
-    header "Téléchargement T5-XXL Encoder (~9.4GB)"
+    SIZE=$(du -sh "$out_file" | cut -f1)
+    log "$FLUX_NAME téléchargé → $out_file ($SIZE)"
 
-    T5_DIR=$MODELS_DIR/clip/t5-v1_1-xxl
-
-    if [ -d "$T5_DIR" ] && [ "$(ls -A $T5_DIR)" ]; then
-        log "T5-XXL déjà présent, skip."
-    else
-        huggingface-cli download \
-            google/t5-v1_1-xxl \
-            --local-dir $T5_DIR \
-            --include "*.safetensors" "*.json" "*.txt" \
-            --token $HF_TOKEN
-        log "T5-XXL téléchargé"
-    fi
+    # Sauvegarder le modèle actif
+    echo "ACTIVE_FLUX_MODEL=$out_file" >> $ENV_FILE
+    echo "ACTIVE_FLUX_NAME=$FLUX_NAME"  >> $ENV_FILE
+    export ACTIVE_FLUX_MODEL="$out_file"
 }
 
 # ─────────────────────────────────────────────
-# STEP 6 : TÉLÉCHARGEMENT VAE
+# TÉLÉCHARGER LES COMPOSANTS ANNEXES
 # ─────────────────────────────────────────────
 download_vae() {
-    header "Téléchargement VAE Flux (~335MB)"
+    header "VAE Flux (~335MB)"
+    VAE_FILE="$MODELS_DIR/vae/ae.safetensors"
 
-    if [ -f "$MODELS_DIR/vae/ae.safetensors" ]; then
-        log "VAE déjà présent, skip."
-        return
-    fi
+    if [ -f "$VAE_FILE" ]; then log "VAE déjà présent → skip"; return; fi
+
+    mkdir -p "$MODELS_DIR/vae"
+    [ -z "$HF_TOKEN" ] && error "HF_TOKEN requis pour le VAE"
 
     huggingface-cli download \
         black-forest-labs/FLUX.1-dev \
         ae.safetensors \
-        --local-dir $MODELS_DIR/vae \
-        --token $HF_TOKEN
+        --local-dir "$MODELS_DIR/vae" \
+        --token "$HF_TOKEN"
 
-    log "VAE téléchargé → $MODELS_DIR/vae/ae.safetensors"
+    log "VAE → $VAE_FILE"
+}
+
+download_clip() {
+    header "CLIP Text Encoder (~1.7GB)"
+    CLIP_DIR="$MODELS_DIR/clip/clip-vit-large-patch14"
+
+    if [ -d "$CLIP_DIR" ] && [ "$(ls -A $CLIP_DIR)" ]; then
+        log "CLIP déjà présent → skip"; return
+    fi
+
+    mkdir -p "$CLIP_DIR"
+    huggingface-cli download \
+        openai/clip-vit-large-patch14 \
+        --local-dir "$CLIP_DIR" \
+        --token "$HF_TOKEN"
+
+    log "CLIP → $CLIP_DIR"
+}
+
+download_t5() {
+    header "T5-XXL Text Encoder (~9.4GB)"
+    T5_DIR="$MODELS_DIR/clip/t5-v1_1-xxl"
+
+    if [ -d "$T5_DIR" ] && [ "$(ls -A $T5_DIR)" ]; then
+        log "T5-XXL déjà présent → skip"; return
+    fi
+
+    mkdir -p "$T5_DIR"
+    huggingface-cli download \
+        google/t5-v1_1-xxl \
+        --local-dir "$T5_DIR" \
+        --include "*.safetensors" "*.json" "*.txt" \
+        --token "$HF_TOKEN"
+
+    log "T5-XXL → $T5_DIR"
 }
 
 # ─────────────────────────────────────────────
-# STEP 7 : INSTALLATION KOHYA SS
+# TÉLÉCHARGER LES MODÈLES CONTROLNET FLUX
+# ─────────────────────────────────────────────
+download_controlnet_flux() {
+    header "ControlNet Flux — InstantX (~3.3GB × 3)"
+
+    mkdir -p "$MODELS_DIR/controlnet"
+
+    _dl_cn() {
+        local repo="$1"
+        local output_name="$2"
+        local out="$MODELS_DIR/controlnet/$output_name"
+
+        if [ -f "$out" ]; then
+            log "$output_name déjà présent → skip"
+            return
+        fi
+
+        info "Téléchargement : $repo"
+        local tmp="$MODELS_DIR/controlnet/tmp_$(basename $repo)"
+        huggingface-cli download \
+            "$repo" \
+            --include "*.safetensors" \
+            --local-dir "$tmp" \
+            --token "$HF_TOKEN"
+
+        local found
+        found=$(find "$tmp" -name "*.safetensors" | head -1)
+        if [ -z "$found" ]; then
+            warn "Fichier non trouvé pour $repo"
+            rm -rf "$tmp"
+            return
+        fi
+
+        mv "$found" "$out"
+        rm -rf "$tmp"
+        SIZE=$(du -sh "$out" | cut -f1)
+        log "$output_name → $out ($SIZE)"
+    }
+
+    _dl_cn "InstantX/FLUX.1-dev-Controlnet-Canny" "flux-controlnet-canny.safetensors"
+    _dl_cn "InstantX/FLUX.1-dev-Controlnet-Depth" "flux-controlnet-depth.safetensors"
+    _dl_cn "InstantX/FLUX.1-dev-Controlnet-Union" "flux-controlnet-union.safetensors"
+
+    log "ControlNet Flux prêt → $MODELS_DIR/controlnet/"
+}
+
+# ─────────────────────────────────────────────
+# LISTER LES MODÈLES FLUX DÉJÀ TÉLÉCHARGÉS
+# ─────────────────────────────────────────────
+list_flux_models() {
+    header "Modèles Flux disponibles sur le volume"
+    local found=0
+
+    for f in "$MODELS_DIR/flux/"*.safetensors; do
+        [ -f "$f" ] || continue
+        SIZE=$(du -sh "$f" | cut -f1)
+        echo -e "  ${GREEN}✓${NC} $(basename $f)  (${YELLOW}$SIZE${NC})"
+        found=1
+    done
+
+    [ $found -eq 0 ] && echo -e "  ${YELLOW}Aucun modèle Flux trouvé dans $MODELS_DIR/flux/${NC}"
+    echo ""
+}
+
+# ─────────────────────────────────────────────
+# SÉLECTIONNER UN MODÈLE DÉJÀ TÉLÉCHARGÉ
+# ─────────────────────────────────────────────
+select_active_model() {
+    header "Modèle Flux actif pour l'entraînement"
+
+    mapfile -t EXISTING < <(find "$MODELS_DIR/flux" -name "*.safetensors" 2>/dev/null | sort)
+
+    if [ ${#EXISTING[@]} -eq 0 ]; then
+        warn "Aucun modèle Flux présent. Télécharger d'abord."
+        return
+    fi
+
+    echo -e "  Modèles présents sur le volume :\n"
+    for i in "${!EXISTING[@]}"; do
+        SIZE=$(du -sh "${EXISTING[$i]}" | cut -f1)
+        echo -e "  ${CYAN}[$i]${NC} $(basename ${EXISTING[$i]})  (${YELLOW}$SIZE${NC})"
+    done
+    echo ""
+
+    read -p "Utiliser quel modèle pour l'entraînement ? [0-$((${#EXISTING[@]}-1))] : " IDX
+
+    SELECTED="${EXISTING[$IDX]}"
+    [ -z "$SELECTED" ] && error "Index invalide"
+
+    # Mettre à jour le script d'entraînement
+    TRAIN_SCRIPT="$WORKSPACE/Sofia_FLux_Lora/scripts/train_lora.sh"
+    if [ -f "$TRAIN_SCRIPT" ]; then
+        sed -i "s|MODEL_PATH=.*|MODEL_PATH=\"$SELECTED\"|" "$TRAIN_SCRIPT"
+        log "train_lora.sh mis à jour → MODEL_PATH=$SELECTED"
+    fi
+
+    # Sauvegarder dans .env
+    sed -i '/^ACTIVE_FLUX/d' "$ENV_FILE" 2>/dev/null || true
+    echo "ACTIVE_FLUX_MODEL=$SELECTED" >> "$ENV_FILE"
+    echo "ACTIVE_FLUX_NAME=$(basename $SELECTED .safetensors)" >> "$ENV_FILE"
+
+    log "Modèle actif : $(basename $SELECTED)"
+}
+
+# ─────────────────────────────────────────────
+# INSTALLATION KOHYA SS
 # ─────────────────────────────────────────────
 install_kohya() {
     header "Installation Kohya SS"
 
     if [ -d "$KOHYA_DIR" ]; then
-        log "Kohya SS déjà installé. Mise à jour..."
-        cd $KOHYA_DIR
-        git pull
+        info "Kohya SS déjà présent → mise à jour..."
+        cd $KOHYA_DIR && git pull -q
     else
         cd $WORKSPACE
         git clone https://github.com/bmaltais/kohya_ss.git
-        cd $KOHYA_DIR
     fi
 
-    # Installation avec support CUDA 12.1
-    pip install -q torch torchvision --index-url https://download.pytorch.org/whl/cu121
+    cd $KOHYA_DIR
+    pip install -q torch torchvision --index-url https://download.pytorch.org/whl/cu124
     pip install -q -r requirements.txt
+    [ -f requirements_flux.txt ] && pip install -q -r requirements_flux.txt || true
 
-    # Fichier requirements_flux.txt (peut ne pas exister dans toutes les versions)
-    if [ -f "requirements_flux.txt" ]; then
-        pip install -q -r requirements_flux.txt
-    fi
-
-    # Vérification
-    python -c "import torch; assert torch.cuda.is_available(), 'CUDA non disponible!'; print(f'✅ CUDA OK — GPU: {torch.cuda.get_device_name(0)}')"
-
-    log "Kohya SS installé → $KOHYA_DIR"
+    python -c "import torch; assert torch.cuda.is_available(); print(f'CUDA ✓ — {torch.cuda.get_device_name(0)}')"
+    log "Kohya SS prêt → $KOHYA_DIR"
 }
 
 # ─────────────────────────────────────────────
-# STEP 8 : INSTALLATION COMFYUI (optionnel)
+# INSTALLATION COMFYUI
 # ─────────────────────────────────────────────
 install_comfyui() {
     header "Installation ComfyUI"
 
     if [ -d "$COMFYUI_DIR" ]; then
-        log "ComfyUI déjà installé. Mise à jour..."
-        cd $COMFYUI_DIR && git pull
+        info "ComfyUI déjà présent → mise à jour..."
+        cd $COMFYUI_DIR && git pull -q
     else
         cd $WORKSPACE
         git clone https://github.com/comfyanonymous/ComfyUI.git
@@ -262,201 +423,157 @@ install_comfyui() {
         pip install -q -r requirements.txt
     fi
 
-    # Liens symboliques vers les modèles
-    info "Création des liens symboliques..."
+    # Liens symboliques
+    mkdir -p $COMFYUI_DIR/models/{unet,vae,clip,loras,controlnet}
 
-    FLUX_LINK=$COMFYUI_DIR/models/unet/flux1-dev.safetensors
-    VAE_LINK=$COMFYUI_DIR/models/vae/ae.safetensors
+    # Lier TOUS les modèles Flux disponibles
+    for f in $MODELS_DIR/flux/*.safetensors; do
+        [ -f "$f" ] || continue
+        LINK="$COMFYUI_DIR/models/unet/$(basename $f)"
+        [ ! -f "$LINK" ] && ln -sf "$f" "$LINK" && log "Lien unet → $(basename $f)"
+    done
 
-    [ ! -f "$FLUX_LINK" ] && ln -sf $MODELS_DIR/flux/flux1-dev.safetensors $FLUX_LINK && log "Lien flux1-dev créé"
-    [ ! -f "$VAE_LINK" ]  && ln -sf $MODELS_DIR/vae/ae.safetensors $VAE_LINK           && log "Lien VAE créé"
+    [ -f "$MODELS_DIR/vae/ae.safetensors" ] && \
+        ln -sf "$MODELS_DIR/vae/ae.safetensors" "$COMFYUI_DIR/models/vae/ae.safetensors" 2>/dev/null || true
 
-    # Lien clip si pas déjà lié
-    CLIP_LINK=$COMFYUI_DIR/models/clip
-    [ ! -L "$CLIP_LINK" ] && ln -sf $MODELS_DIR/clip $CLIP_LINK && log "Lien CLIP créé"
+    [ -d "$MODELS_DIR/clip" ] && \
+        ln -sf "$MODELS_DIR/clip" "$COMFYUI_DIR/models/clip" 2>/dev/null || true
 
-    # Lien loras
-    LORAS_LINK=$COMFYUI_DIR/models/loras
-    [ ! -L "$LORAS_LINK" ] && ln -sf $LORAS_DIR $LORAS_LINK && log "Lien loras créé"
+    [ -d "$LORAS_DIR" ] && \
+        ln -sf "$LORAS_DIR" "$COMFYUI_DIR/models/loras" 2>/dev/null || true
 
-    # Custom nodes essentiels
-    info "Installation des custom nodes..."
+    [ -d "$MODELS_DIR/controlnet" ] && \
+        ln -sf "$MODELS_DIR/controlnet" "$COMFYUI_DIR/models/controlnet" 2>/dev/null || true
+
+    # Custom nodes
     NODES_DIR=$COMFYUI_DIR/custom_nodes
-
     for repo in \
         "https://github.com/ltdrdata/ComfyUI-Manager.git" \
         "https://github.com/cubiq/ComfyUI_IPAdapter_plus.git" \
         "https://github.com/Kosinkadink/ComfyUI-Advanced-ControlNet.git"
     do
         name=$(basename $repo .git)
-        if [ ! -d "$NODES_DIR/$name" ]; then
-            git clone -q $repo $NODES_DIR/$name
-            log "Custom node installé : $name"
-        else
-            log "Custom node déjà présent : $name"
-        fi
+        [ ! -d "$NODES_DIR/$name" ] && git clone -q $repo $NODES_DIR/$name && log "Node : $name"
     done
 
-    log "ComfyUI installé → $COMFYUI_DIR"
+    log "ComfyUI prêt → $COMFYUI_DIR"
 }
 
 # ─────────────────────────────────────────────
-# STEP 9 : VARIABLES D'ENVIRONNEMENT
+# STRUCTURE DE DOSSIERS
 # ─────────────────────────────────────────────
-setup_env() {
-    header "Configuration des variables d'environnement"
-
-    cat >> ~/.bashrc << 'EOF'
-
-# ── Sofia Belmont LoRA Pipeline ──
-export WORKSPACE=/workspace
-export MODELS_DIR=/workspace/models
-export LORA_DIR=/workspace/loras
-export DATASET_DIR=/workspace/dataset/sofia
-export KOHYA_DIR=/workspace/kohya_ss
-export COMFYUI_DIR=/workspace/ComfyUI
-export PYTHONPATH=/workspace/kohya_ss:$PYTHONPATH
-EOF
-
-    source ~/.bashrc
-    log "Variables d'environnement configurées dans ~/.bashrc"
+create_structure() {
+    mkdir -p $MODELS_DIR/{flux,clip,vae,controlnet}
+    mkdir -p $WORKSPACE/dataset/sofia/{raw,processed,captions}
+    mkdir -p $LORAS_DIR $LOGS_DIR $OUTPUTS_DIR
+    log "Structure créée"
 }
 
 # ─────────────────────────────────────────────
-# STEP 10 : COPIER LES SCRIPTS DU PROJET
+# DEPS SYSTÈME
 # ─────────────────────────────────────────────
-copy_project_scripts() {
-    header "Vérification des scripts du projet"
-
-    SCRIPT_LIST=(
-        "prepare_dataset.py"
-        "generate_captions.py"
-        "train_lora.sh"
-        "test_lora.py"
-    )
-
-    for script in "${SCRIPT_LIST[@]}"; do
-        if [ -f "$SCRIPTS_DIR/$script" ]; then
-            log "$script présent"
-        else
-            warn "$script manquant dans $SCRIPTS_DIR/"
-        fi
-    done
-
-    if [ -f "$WORKSPACE/sofia_lora_config.toml" ]; then
-        log "sofia_lora_config.toml présent"
-    else
-        warn "sofia_lora_config.toml manquant dans $WORKSPACE/"
-    fi
+install_deps() {
+    apt-get update -qq
+    apt-get install -y -qq git curl wget aria2 tree htop tmux 2>/dev/null
+    pip install -q --upgrade pip huggingface_hub Pillow tqdm tensorboard accelerate
+    log "Dépendances installées"
 }
 
 # ─────────────────────────────────────────────
 # RAPPORT FINAL
 # ─────────────────────────────────────────────
 final_report() {
-    header "Setup terminé — Rapport"
+    header "Setup terminé"
 
-    echo -e "${GREEN}Modèles téléchargés :${NC}"
-    ls -lh $MODELS_DIR/flux/ 2>/dev/null    | grep safetensors && true
-    ls -lh $MODELS_DIR/vae/ 2>/dev/null     | grep safetensors && true
-    ls -lh $MODELS_DIR/clip/ 2>/dev/null    | grep -v total    && true
+    list_flux_models
 
+    echo -e "  ${YELLOW}Commandes rapides :${NC}"
+    echo -e "  → Entraîner          : bash $WORKSPACE/Sofia_FLux_Lora/scripts/train_lora.sh"
+    echo -e "  → Changer de modèle  : bash $0 --select-model"
+    echo -e "  → TensorBoard        : tensorboard --logdir $LOGS_DIR --host 0.0.0.0 --port 6006"
+    echo -e "  → ComfyUI            : python $COMFYUI_DIR/main.py --listen 0.0.0.0 --port 8188"
     echo ""
-    echo -e "${GREEN}Espace utilisé :${NC}"
-    du -sh $MODELS_DIR 2>/dev/null || true
-    df -h $WORKSPACE | tail -1
-
-    echo ""
-    echo -e "${CYAN}═══════════════════════════════════════${NC}"
-    echo -e "${CYAN}  PROCHAINES ÉTAPES${NC}"
-    echo -e "${CYAN}═══════════════════════════════════════${NC}"
-    echo ""
-    echo -e "1. ${YELLOW}Uploader vos photos Sofia${NC} dans :"
-    echo -e "   $DATASET_DIR/raw/"
-    echo ""
-    echo -e "2. ${YELLOW}Préparer le dataset :${NC}"
-    echo -e "   python $SCRIPTS_DIR/prepare_dataset.py"
-    echo ""
-    echo -e "3. ${YELLOW}Générer les captions :${NC}"
-    echo -e "   python $SCRIPTS_DIR/generate_captions.py"
-    echo ""
-    echo -e "4. ${YELLOW}Lancer l'entraînement :${NC}"
-    echo -e "   bash $SCRIPTS_DIR/train_lora.sh"
-    echo ""
-    echo -e "5. ${YELLOW}Lancer ComfyUI :${NC}"
-    echo -e "   python $COMFYUI_DIR/main.py --listen 0.0.0.0 --port 8188"
-    echo ""
-    echo -e "${GREEN}✅ Setup Sofia Belmont LoRA Pipeline terminé !${NC}"
 }
 
 # ─────────────────────────────────────────────
 # MENU PRINCIPAL
 # ─────────────────────────────────────────────
 main() {
-    echo -e "${CYAN}"
-    echo "  ╔═══════════════════════════════════════════╗"
-    echo "  ║   Sofia Belmont — LoRA Training Setup     ║"
-    echo "  ║   Flux.1-dev + Kohya SS + ComfyUI         ║"
-    echo "  ╚═══════════════════════════════════════════╝"
+    echo -e "${CYAN}${BOLD}"
+    echo "  ╔═══════════════════════════════════════════════╗"
+    echo "  ║   Sofia Belmont — LoRA Training Setup        ║"
+    echo "  ║   Flux.1-dev + Kohya SS — NVIDIA A40 48GB   ║"
+    echo "  ╚═══════════════════════════════════════════════╝"
     echo -e "${NC}"
 
-    check_gpu
-    check_disk
+    nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>/dev/null || warn "nvidia-smi non disponible"
 
-    # Mode automatique ou interactif
-    if [ "$1" == "--auto" ]; then
-        if [ -z "$HF_TOKEN" ]; then
-            error "Mode --auto requiert HF_TOKEN dans l'environnement : export HF_TOKEN=hf_xxx..."
-        fi
-    else
-        ask_hf_token
+    load_tokens "$1"
+
+    # Mode spécial : juste changer le modèle actif
+    if [ "$1" == "--select-model" ]; then
+        select_active_model
+        exit 0
+    fi
+
+    # Mode spécial : juste lister les modèles
+    if [ "$1" == "--list-models" ]; then
+        list_flux_models
+        exit 0
     fi
 
     echo ""
-    echo -e "${YELLOW}Que voulez-vous installer ?${NC}"
-    echo "  [1] Setup complet (Flux + Kohya + ComfyUI)"
-    echo "  [2] Flux + Kohya seulement (sans ComfyUI)"
-    echo "  [3] Uniquement les modèles Flux (download seul)"
-    echo "  [4] Uniquement Kohya SS"
+    echo -e "  ${BOLD}Que voulez-vous faire ?${NC}"
     echo ""
-    read -p "Votre choix [1-4] : " CHOICE
+    echo -e "  ${CYAN}[1]${NC} Setup complet  (Flux + Kohya + ComfyUI + ControlNet)"
+    echo -e "  ${CYAN}[2]${NC} Flux + Kohya   (sans ComfyUI)"
+    echo -e "  ${CYAN}[3]${NC} Télécharger un modèle Flux seulement"
+    echo -e "  ${CYAN}[4]${NC} Kohya SS seulement"
+    echo -e "  ${CYAN}[5]${NC} Changer le modèle Flux actif"
+    echo -e "  ${CYAN}[6]${NC} ControlNet Flux seulement (Canny / Depth / Union)"
+    echo ""
+    read -p "Votre choix [1-6] : " SETUP_CHOICE
 
     create_structure
-    install_system_deps
-    install_python_deps
+    install_deps
 
-    case $CHOICE in
+    case $SETUP_CHOICE in
         1)
-            download_flux
+            select_flux_model
+            download_flux_model
+            download_vae
             download_clip
             download_t5
-            download_vae
             install_kohya
             install_comfyui
+            download_controlnet_flux
             ;;
         2)
-            download_flux
+            select_flux_model
+            download_flux_model
+            download_vae
             download_clip
             download_t5
-            download_vae
             install_kohya
             ;;
         3)
-            download_flux
-            download_clip
-            download_t5
-            download_vae
+            select_flux_model
+            download_flux_model
             ;;
         4)
             install_kohya
+            ;;
+        5)
+            select_active_model
+            ;;
+        6)
+            download_controlnet_flux
             ;;
         *)
             error "Choix invalide"
             ;;
     esac
 
-    setup_env
-    copy_project_scripts
     final_report
 }
 

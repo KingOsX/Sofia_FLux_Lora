@@ -47,8 +47,21 @@ nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader | 
 log "CUDA disponible : $(python3 -c 'import torch; print(torch.cuda.is_available())')"
 
 # ─────────────────────────────────────────────
-# 2. VARIABLES D'ENVIRONNEMENT
+# 2. TOKENS & VARIABLES D'ENVIRONNEMENT
 # ─────────────────────────────────────────────
+
+# Charger .env depuis le volume persistant (s'il existe)
+ENV_FILE=$WORKSPACE/.env
+if [ -f "$ENV_FILE" ]; then
+    source "$ENV_FILE"
+    log ".env chargé → $ENV_FILE"
+fi
+
+# Les tokens peuvent aussi venir des env vars RunPod (pod settings)
+# → Pod Settings → Environment Variables → HF_TOKEN / CIVITAI_TOKEN
+[ -n "$HF_TOKEN" ]       && log "HF_TOKEN      ✓" || warn "HF_TOKEN manquant (requis pour setup)"
+[ -n "$CIVITAI_TOKEN" ]  && log "CIVITAI_TOKEN ✓" || warn "CIVITAI_TOKEN manquant"
+
 export WORKSPACE=$WORKSPACE
 export MODELS_DIR=$MODELS_DIR
 export LORA_DIR=$WORKSPACE/loras
@@ -67,6 +80,7 @@ export DATASET_DIR=/workspace/dataset/sofia
 export KOHYA_DIR=/workspace/kohya_ss
 export COMFYUI_DIR=/workspace/ComfyUI
 export PYTHONPATH=/workspace/kohya_ss:$PYTHONPATH
+[ -f /workspace/.env ] && source /workspace/.env
 EOF
     log ".bashrc mis à jour"
 fi
@@ -77,7 +91,7 @@ fi
 if [ -d "$REPO_DIR/.git" ]; then
     info "Repo déjà cloné → mise à jour..."
     cd $REPO_DIR
-    git pull origin main 2>&1 | tee -a $LOG_FILE
+    git pull origin master 2>&1 | tee -a $LOG_FILE
     log "Repo mis à jour : $REPO_DIR"
 else
     info "Clonage du repo..."
