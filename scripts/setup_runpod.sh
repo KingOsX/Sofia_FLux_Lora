@@ -475,7 +475,10 @@ create_structure() {
 install_deps() {
     apt-get update -qq
     apt-get install -y -qq git curl wget aria2 tree htop tmux 2>/dev/null
-    pip install -q --upgrade pip huggingface_hub Pillow tqdm tensorboard accelerate
+    pip install -q --upgrade pip
+    pip install -q --upgrade "huggingface_hub[cli]" Pillow tqdm tensorboard accelerate
+    # S'assurer que huggingface-cli est dans le PATH
+    export PATH="$HOME/.local/bin:$PATH"
     log "Dépendances installées"
 }
 
