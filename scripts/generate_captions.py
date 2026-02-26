@@ -116,7 +116,7 @@ def generate_auto(image_dir: str, caption_dir: str, overwrite: bool = False):
     model_id = "microsoft/Florence-2-large"
     print(f"   Chargement {model_id}...")
 
-    processor = AutoProcessor.from_pretrained(model_id, trust_remote_code=True)
+    processor = AutoProcessor.from_pretrained(model_id, trust_remote_code=True, use_fast=False)
     model     = AutoModelForCausalLM.from_pretrained(
         model_id,
         torch_dtype=torch.float16 if device == "cuda" else torch.float32,
