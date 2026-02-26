@@ -12,15 +12,21 @@ set -e
 # CONFIG — Modifier selon vos besoins
 # ─────────────────────────────────────────────
 WORKSPACE=/workspace
-MODEL_PATH="$WORKSPACE/models/flux/flux1-dev.safetensors"
-CLIP_L_PATH="$WORKSPACE/models/clip/clip-vit-large-patch14"
-T5XXL_PATH="$WORKSPACE/models/clip/t5-v1_1-xxl"
+COMFYUI_DIR="$WORKSPACE/ComfyUI"
+KOHYA_DIR="$WORKSPACE/kohya_ss"
+SCRIPTS_DIR="$KOHYA_DIR/sd-scripts"
+
+# Modèle Flux — prend le premier .safetensors valide (>1GB)
+MODEL_PATH=$(find $WORKSPACE/models/flux -name "*.safetensors" -size +1M 2>/dev/null | head -1)
+
+# CLIP — priorité aux fichiers safetensors ComfyUI
+CLIP_L_PATH="$COMFYUI_DIR/models/clip/clip_l.safetensors"
+T5XXL_PATH="$COMFYUI_DIR/models/clip/t5xxl_fp8_e4m3fn.safetensors"
 AE_PATH="$WORKSPACE/models/vae/ae.safetensors"
 CONFIG_PATH="$WORKSPACE/sofia_lora_config.toml"
 OUTPUT_DIR="$WORKSPACE/loras"
 OUTPUT_NAME="sofia_belmont_v1"
 LOGS_DIR="$WORKSPACE/logs"
-KOHYA_DIR="$WORKSPACE/kohya_ss"
 
 # Paramètres d'entraînement — optimisés A40 48GB
 # A40 avantages : 48GB VRAM → network_dim élevé sans OOM
@@ -56,12 +62,12 @@ echo "  ╚═══════════════════════
 echo -e "${NC}"
 
 # Vérifier les fichiers requis
-[ -f "$MODEL_PATH" ]    || error "Flux.1-dev non trouvé : $MODEL_PATH"
-[ -d "$CLIP_L_PATH" ]   || error "CLIP encoder non trouvé : $CLIP_L_PATH"
-[ -d "$T5XXL_PATH" ]    || error "T5-XXL non trouvé : $T5XXL_PATH"
+[ -n "$MODEL_PATH" ] && [ -f "$MODEL_PATH" ] || error "Aucun modèle Flux trouvé dans $WORKSPACE/models/flux/"
+[ -f "$CLIP_L_PATH" ]   || error "CLIP encoder non trouvé : $CLIP_L_PATH"
+[ -f "$T5XXL_PATH" ]    || error "T5-XXL non trouvé : $T5XXL_PATH"
 [ -f "$AE_PATH" ]       || error "VAE non trouvé : $AE_PATH"
 [ -f "$CONFIG_PATH" ]   || error "Config TOML non trouvée : $CONFIG_PATH"
-[ -d "$KOHYA_DIR" ]     || error "Kohya SS non installé : $KOHYA_DIR"
+[ -f "$SCRIPTS_DIR/flux_train_network.py" ] || error "flux_train_network.py non trouvé : $SCRIPTS_DIR"
 
 log "Tous les fichiers requis sont présents"
 
@@ -97,9 +103,9 @@ START_TIME=$(date +%s)
 # ─────────────────────────────────────────────
 # LANCEMENT DE L'ENTRAÎNEMENT
 # ─────────────────────────────────────────────
-export PYTHONPATH=$KOHYA_DIR:$PYTHONPATH
+export PYTHONPATH=$SCRIPTS_DIR:$KOHYA_DIR:$PYTHONPATH
 
-python $KOHYA_DIR/flux_train_network.py \
+python $SCRIPTS_DIR/flux_train_network.py \
     --pretrained_model_name_or_path="$MODEL_PATH" \
     --clip_l="$CLIP_L_PATH" \
     --t5xxl="$T5XXL_PATH" \
