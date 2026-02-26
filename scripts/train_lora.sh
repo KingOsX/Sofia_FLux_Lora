@@ -135,6 +135,10 @@ python $SCRIPTS_DIR/flux_train_network.py \
     --gradient_checkpointing \
     --sdpa \
     \
+    --min_bucket_reso=512 \
+    --max_bucket_reso=2048 \
+    --bucket_reso_steps=64 \
+    \
     --timestep_sampling="sigmoid" \
     --model_prediction_type="raw" \
     --discrete_flow_shift=3.1582 \
