@@ -6,16 +6,16 @@
 # =============================================================================
 
 [general]
-enable_bucket         = true
+enable_bucket     = true
+caption_extension = ".txt"
+shuffle_caption   = false   # Ne pas mélanger — trigger word doit rester en 1er
+
+[[datasets]]
+resolution            = 1024   # Résolution d'entraînement Flux
+batch_size            = 1
 min_bucket_resolution = 512
 max_bucket_resolution = 2048
 bucket_reso_steps     = 64
-caption_extension     = ".txt"
-shuffle_caption       = false   # Ne pas mélanger — trigger word doit rester en 1er
-
-[[datasets]]
-resolution  = 1024       # Résolution d'entraînement Flux (1024x1024)
-batch_size  = 1          # 1 sur A100 40GB avec gradient checkpointing
 
   [[datasets.subsets]]
   image_dir         = "/workspace/dataset/sofia/processed"
