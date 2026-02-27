@@ -158,6 +158,16 @@ if [ -d "$COMFYUI_DIR" ]; then
     pip install -q --root-user-action=ignore -r $COMFYUI_DIR/requirements.txt 2>&1 | tail -1 | tee -a $LOG_FILE
     log "ComfyUI dépendances OK"
 
+    # Dépendances des custom nodes (perdues à chaque restart)
+    for node_dir in $COMFYUI_DIR/custom_nodes/*/; do
+        req="$node_dir/requirements.txt"
+        if [ -f "$req" ]; then
+            node_name=$(basename "$node_dir")
+            pip install -q --root-user-action=ignore -r "$req" 2>&1 | tail -1 | tee -a $LOG_FILE
+            log "Custom node deps : $node_name ✓"
+        fi
+    done
+
     # Symlinks modèles → ComfyUI
     mkdir -p $COMFYUI_DIR/models/{checkpoints,unet,vae,clip,loras,controlnet}
 
@@ -224,14 +234,14 @@ log "Jupyter Lab démarré → port 8888 (sans mot de passe)"
 # fi
 
 # --- ComfyUI (port 8188) ---
-# if [ -d "$COMFYUI_DIR" ]; then
-#     nohup python $COMFYUI_DIR/main.py \
-#         --listen 0.0.0.0 \
-#         --port 8188 \
-#         --enable-cors-header \
-#         > $WORKSPACE/comfyui.log 2>&1 &
-#     log "ComfyUI démarré → port 8188"
-# fi
+if [ -d "$COMFYUI_DIR" ]; then
+    nohup python $COMFYUI_DIR/main.py \
+        --listen 0.0.0.0 \
+        --port 8188 \
+        --enable-cors-header \
+        > $WORKSPACE/comfyui.log 2>&1 &
+    log "ComfyUI démarré → port 8188"
+fi
 
 # ─────────────────────────────────────────────
 # RAPPORT FINAL

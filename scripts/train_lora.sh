@@ -32,9 +32,9 @@ LOGS_DIR="$WORKSPACE/logs"
 # A40 avantages : 48GB VRAM → network_dim élevé sans OOM
 MAX_TRAIN_STEPS=1500
 SAVE_EVERY_N_STEPS=250
-NETWORK_DIM=64          # 32 sur A100 40GB → 64 possible sur A40 48GB
-NETWORK_ALPHA=32        # Toujours la moitié de dim pour stabilité
-LEARNING_RATE="5e-4"
+NETWORK_DIM=32          # 64 → trop élevé (~54 imgs) = overfitting + déformations
+NETWORK_ALPHA=16        # Moitié de dim
+LEARNING_RATE="8e-5"    # 5e-4 était trop élevé pour Flux → déformations
 LR_WARMUP_STEPS=100
 SEED=42
 
@@ -121,6 +121,7 @@ python $SCRIPTS_DIR/flux_train_network.py \
     --network_dim=$NETWORK_DIM \
     --network_alpha=$NETWORK_ALPHA \
     --network_train_unet_only \
+    --caption_dropout_rate=0.05 \
     \
     --optimizer_type="adamw8bit" \
     --learning_rate=$LEARNING_RATE \
