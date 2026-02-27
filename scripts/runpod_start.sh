@@ -144,7 +144,9 @@ fi
 # 5. VÉRIFICATION KOHYA SS
 # ─────────────────────────────────────────────
 if [ -d "$KOHYA_DIR" ]; then
-    log "Kohya SS présent"
+    log "Kohya SS présent → réinstallation des dépendances sd-scripts..."
+    pip install -q --root-user-action=ignore -r $KOHYA_DIR/sd-scripts/requirements.txt 2>&1 | tail -1 | tee -a $LOG_FILE
+    log "Kohya sd-scripts dépendances OK"
 else
     warn "Kohya SS non installé → lancer setup_runpod.sh"
 fi
